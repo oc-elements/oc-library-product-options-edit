@@ -1,10 +1,13 @@
 <link rel="import" href="../polymer/polymer.html">
 
+<link rel="import" href="../oc-product-library-api/oc-product-library-api.html">
+<link rel="import" href="../oc-list-selection/oc-list-selection.html">
+
 <!--
 `oc-library-product-options-edit`
 Element to edit library product option sets on the Ordercloud platform
 
-@demo demo/index.html 
+@demo demo/index.html
 -->
 
 <dom-module id="oc-library-product-options-edit">
@@ -12,22 +15,159 @@ Element to edit library product option sets on the Ordercloud platform
     <style>
       :host {
         display: block;
+        padding-bottom: 10px;
+      }
+
+      small {
+        text-align: right;
+        display: block;
+        margin-right: 20px;
+      }
+
+      paper-button {
+        margin: 10px 0;
       }
     </style>
-    <h2>Hello [[prop1]]</h2>
+
+    <oc-product-library-api id="prodApi"></oc-product-library-api>
+
+    <oc-list-selection selected-list="[[selectedList]]" selectable-list="[[selectableList]]"></oc-list-selection>
+    <small>Only option sets with extras in will display here</small>
+
+    <paper-button on-tap="_updateOptions" raised>Update Options</paper-button>
+
   </template>
 
   <script>
     Polymer({
 
       is: 'oc-library-product-options-edit',
+      behaviors: [OC.Behaviours.ApiConsumer],
 
       properties: {
-        prop1: {
-          type: String,
-          value: 'oc-library-product-options-edit',
+        organisationId: Number,
+        loaded: Boolean,
+        productId : {
+          type: Number,
+          computed: "_computeProductId(product)"
         },
+
+        selectedList : {
+          type: Array,
+          value: function() {
+            return [];
+          }
+        },
+        selectableList: {
+          type: Array,
+          value: function() {
+            return [];
+          }
+        },
+
+        allOptionSets: Array,
+
+        loading: {
+          type: Boolean,
+          notify: true
+        }
+
       },
+
+      observers: [
+        "refresh(productId)",
+        "_computeOptionSets(allOptionSets, product.optionSets)"
+      ],
+
+      refresh : function(){
+
+        if (!this.productId || this.loaded) {
+          return
+        }
+
+        this.loading = true;
+
+        this.getOptionSets()
+
+        this.loaded = true;
+
+      },
+
+      getOptionSets : function(){
+        this.$.prodApi.getProductOptionSets(1, -1)
+                .then(this._setPropertyResponseResults.bind(this, 'allOptionSets'))
+                .catch(this.fire.bind(this, 'options_error', 'Could not load option sets'))
+                .finally(this.set.bind(this, 'loading', false));
+      },
+
+      _computeOptionSets : function(allOptionSets, productOptionSets){
+
+        allOptionSets.forEach(function(optionSet){
+
+          var isProductOptionSet = false;
+
+          productOptionSets.forEach(function(productOptionSet){
+            if(optionSet.id === productOptionSet.id) {
+              isProductOptionSet = true;
+
+              this.push('selectedList', optionSet);
+            }
+          }.bind(this));
+
+          if(!isProductOptionSet && optionSet.options.length){
+            this.push('selectableList', optionSet);
+          }
+
+        }.bind(this));
+
+      },
+
+      _computeProductId : function(product){
+        return product.id;
+      },
+
+      _updateOptions : function(){
+
+        this.loading = true;
+
+        var promisesToExecute = [],
+                selected = this.selectedList,
+                original = this.product.optionSets;
+
+        selected.forEach(function(obj){
+          var isInOriginal = false;
+
+          for(var i=0; i<original.length; i++) {
+            if(obj.id === original[i].id){
+              isInOriginal = true;
+            }
+          }
+
+          if(!isInOriginal) {
+            promisesToExecute.push(this.$.prodApi.addProductOptionSet(this.productId, obj.id))
+          }
+
+        }.bind(this))
+
+        original.forEach(function(obj){
+          var isInselected = false;
+
+          for(var i=0; i<selected.length; i++) {
+            if(obj.id === selected[i].id){
+              isInselected = true;
+            }
+          }
+
+          if(!isInselected) {
+            promisesToExecute.push(this.$.prodApi.removeProductOptionSet(this.productId, obj.id))
+          }
+
+        }.bind(this))
+
+        Promise.all(promisesToExecute)
+                .catch(this.fire.bind(this, 'extra-set-error', 'Failed to save option sets'))
+                .finally(this.set.bind(this, 'loading', false));
+      }
 
     });
   </script>
